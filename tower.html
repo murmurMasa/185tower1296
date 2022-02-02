@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>タワーゲーム</title>
+<script src="Box2D.min.js"></script>
+<script>
+let canvas, context;            //キャンバス
+let world, w, h;                //物理ワールド、幅、高さ
+let bodyDef, fixDex;            //物体、形状の定義
+const blocks = new Array()      //ブロック（オブジェクト、辺の数）
+let selectBlock = null;         //選択中のブロック
+let mouseDown = false;          //マウスボタンが押されたか
+const scale = 10;               //縮尺
+const b2Vec2 = Box2D.Common.Math.b2Vec2;                    //2Dベクトル
+const color = ["#FF3333", "#33FF33", "#3333FF", "#FFFF33"]; //ブロックの色
+
+const init = () => {
+    //キャンバスの取得
+    canvas = document.getElementById("field");              //キャンバスを取得
+    context = canvas.getContext("2d");
+    //物理ワールド（重力加速度：9.8)
+    world = new Box2D.Dynamics.b2World(new b2Vec2(0, 9.8), true); //重力
+    [w, h] = [canvas.width/scale, canvas.height/scale];
+    //物体、形状の定義
+    bodyDef = new Box2D.Dynamics.b2BodyDef;
+    fixDef = new Box2D.Dynamics.b2FixtureDef;
+    fixDef.shape = new Box2D.Collision.Shapes.b2PolygonShape;   //形状は多角形
+    [fixDef.density, fixDef.friction, fixDef.restitution] = [1, 1, 0.1];    //密度、摩擦係数、反発係数
+    //地面、壁
+    setBox(w/2, h, w/2, 1);             //床は横幅60、高さ2の四角形　壁は横幅2、高さ10の四角形
+    setBox(0, h-5, 1, 5);
+    setBox(w, h-5, 1, 5);
+    //ブロック
+    for (let i=0; i<16; i++) {
+        const [x, n] = [i*3 + 5, (i%4) + 3];
+        blocks.push({"object":setPolygon(x, 30, n), "n":n});    //正三角形、正方形、正五角形、正六角形を作成
+    }
+    //マウスイベントの登録
+    document.addEventListener("mousedown", startDrag);           //マウスボタンを押したときにstartDrag()、マウスを動かしたときにdrag()、放したときにdrop()関数を実行
+    document.addEventListener("mousemove", drag);
+    document.addEventListener("mouseup", drop);
+    //ゲーム開始
+    setInterval(update, 1000/60);       //60分の1秒ごとにupdate()関数を実行
+}
+
+const setBox = (x, y, w, h) => {
+    //四角形の作成
+    bodyDef.type = Box2D.Dynamics.b2Body.b2_staticBody;     //床と壁は静的オブジェクト
+    fixDef.shape.SetAsBox(w, h);
+    const box = world.CreateBody(bodyDef);
+    box.CreateFixture(fixDef);
+    box.SetPosition(new b2Vec2(x, y));                      //四角形の中心座標
+}
+
+const setPolygon = (x, y, n) => {
+    //n角形の作成
+    bodyDef.type = Box2D.Dynamics.b2Body.b2_dynamicBody;    //多角形は動的オブジェクト
+    const points = new Array(n);
+    for (let i=0; i<n; i++) {
+        const px = 2 * Math.cos(i/n * Math.PI*2);           //n角形の頂点の座標
+        const py = 2 * Math.sin(i/n * Math.PI*2);
+        points[i] = new b2Vec2(px, py);
+    }
+    fixDef.shape.SetAsArray(points, n);
+    const polygon = world.CreateBody(bodyDef);
+    polygon.CreateFixture(fixDef);
+    polygon.SetPosition(new b2Vec2(x, y));                  //n角形の中心座標
+    return polygon;
+}
+
+const update = () => {
+    //物理ワールドを更新
+    world.Step(1/60, 10, 10);                               //60文の1秒ごとに物理ワールドを更新
+    world.ClearForces();
+    //地面、壁の描画
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#CC9933";                          //床と壁の色は、黄土色
+    context.fillRect(0, (h-1) * scale, canvas.width, 1*scale);  //床と壁を描く
+    context.fillRect(0, (h-10) * scale, 1*scale, 10*scale);
+    context.fillRect((w-1)*scale, (h-10)*scale, 1*scale, 10*scale);
+    //ブロックの描画
+    for (const block of blocks) {                           //多角形の数（16個)くり返し
+       const x = block.object.GetPosition().x * scale;      //物理ワールドの座標を取得してキャンバスの座標に変換
+       const y = block.object.GetPosition().y * scale;
+       context.save();
+       context.translate(x, y);
+       context.rotate(block.object.GetAngle());             //物理ワールドの角度を取得してキャンバスを回転
+       context.fillStyle = color[block.n - 3];
+       context.strokeStyle = "#000000";                     //多角形の枠線の色は黒
+       context.beginPath();
+       for (let i=0; i<block.n; i++) {                      //n角形を描く
+          const px = 2 * scale * Math.cos(i/block.n * Math.PI*2);
+          const py = 2 * scale * Math.sin(i/block.n * Math.PI*2);
+          if (i==0) {
+              context.moveTo(px, py);
+          } else {
+              context.lineTo(px, py);
+          }
+       }
+       context.closePath();
+       context.fill();
+       context.stroke();
+       context.restore();   
+    }
+    //高さの表示
+    let minH = h;
+    for(const block of blocks) {
+        const y = block.object.GetPosition().y;
+        if ((block.object != selectBlock)&&(y < minH)) minH = y;    //最も上にある多角形のｙ座標を求める
+    }
+    document.getElementById("height").innerText = Math.round(h-1-minH); //高さとして表示
+}
+
+const startDrag = event => {
+    //ブロックをつかむ
+    const rect = event.target.getBoundingClientRect();
+    const x = (event.clientX - rect.left)/scale;        //物理ワールド上のマウスカーソルの座標
+    const y = (event.clientY - rect.top)/scale;
+    if (selectBlock == null) {                          //選択中の多角形が無いなら
+       //ブロックを選択
+       let minD = w;
+       for (const block of blocks) {                    //すべての多角形を調べる
+          const ox = block.object.GetPosition().x;
+          const oy = block.object.GetPosition().y;
+          const d = ((x-ox) ** 2 + (y-oy) **2) ** 0.5;  //多角形の中心とマウスカーソルの距離
+          if ((d < 2) && (d < minD)) {                  //距離が２未満かつ最も近い多角形を選択する
+             selectBlock = block.object;
+             minD = d;          
+          }      
+       }
+       //カーソル位置にブロックを移動
+       if (selectBlock != null) {                       //選択している多角形があるなら
+          selectBlock.SetAwake(false);
+          selectBlock.SetPosition(new b2Vec2(x, y));    //多角形をマウスカーソルの位置に移動
+          mouseDown = true;
+       }
+    }
+}
+
+const drag = event => {
+    //ブロックを動かす
+    const rect = event.target.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
+    if ((mouseDown) && (selectBlock != null)) {
+        selectBlock.SetAwake(false);
+        selectBlock.SetPosition(new b2Vec2(x, y));
+    }
+}
+
+const drop = event => {
+    //ブロックを放す
+    if ((mouseDown) && (selectBlock != null)) {
+        selectBlock.SetAwake(true);
+        mouseDown = false;
+        selectBlock = null;                         //選択中のブロックを無しにする
+    }
+}
+
+const reset = () => {
+    //ブロックを元の位置に戻す
+    for (let i=0; i<blocks.length; i++) {
+        blocks[i].object.SetAwake(false);
+        blocks[i].object.SetPosition(new b2Vec2(i*3 + 5, 30));  //多角形を初期位置に移動
+        blocks[i].object.SetAwake(true);
+    }
+}
+</script>
+</head>
+<body onload="init()">
+<p>タワーゲーム</p>
+<input type="button" value="はじめから" onclick="reset()">
+高さ：<span id="height"></span>
+<hr>
+<canvas id="field" width="600" height="600"></canvas>
+</body>
+</html>
